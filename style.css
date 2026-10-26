@@ -20,6 +20,23 @@
   --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+html {
+  font-size: 16px;
+}
+
+/* PC・大画面向け: 全体の文字・ボタン・UIサイズを視認しやすく拡大 */
+@media (min-width: 1200px) {
+  html {
+    font-size: 17.5px;
+  }
+}
+
+@media (min-width: 1600px) {
+  html {
+    font-size: 19px;
+  }
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -238,11 +255,14 @@ body {
   border-radius: 4px;
   transform-origin: top center;
   transition: transform 0.15s ease-out;
+  min-width: 580px;
+  max-width: 900px;
+  width: 100%;
 }
 
 .sheet-img, .sheet-canvas {
   display: block;
-  max-width: 100%;
+  width: 100%;
   height: auto;
   user-select: none;
 }
@@ -867,6 +887,7 @@ body {
   }
 
   .canvas-wrapper {
+    min-width: unset;
     max-width: 100%;
   }
 
