@@ -403,6 +403,16 @@ class ErhuApp {
     this.jsonText = document.getElementById("jsonText");
     this.applyJsonBtn = document.getElementById("applyJsonBtn");
 
+    // Mobile Tabs
+    this.mainContent = document.getElementById("mainContent");
+    this.tabSheetBtn = document.getElementById("tabSheetBtn");
+    this.tabMonitorBtn = document.getElementById("tabMonitorBtn");
+
+    // Initialize default tab class
+    if (this.mainContent) {
+      this.mainContent.classList.add("tab-sheet");
+    }
+
     // DeepSeek Modal
     this.deepseekModalBtn = document.getElementById("deepseekModalBtn");
     this.deepseekModal = document.getElementById("deepseekModal");
@@ -474,6 +484,23 @@ class ErhuApp {
     });
 
     this.fileInput.addEventListener("change", (e) => this.handleFileUpload(e));
+
+    // Mobile tab clicks
+    if (this.tabSheetBtn && this.tabMonitorBtn) {
+      this.tabSheetBtn.addEventListener("click", () => {
+        this.tabSheetBtn.classList.add("active");
+        this.tabMonitorBtn.classList.remove("active");
+        this.mainContent.classList.remove("tab-monitor");
+        this.mainContent.classList.add("tab-sheet");
+      });
+
+      this.tabMonitorBtn.addEventListener("click", () => {
+        this.tabMonitorBtn.classList.add("active");
+        this.tabSheetBtn.classList.remove("active");
+        this.mainContent.classList.remove("tab-sheet");
+        this.mainContent.classList.add("tab-monitor");
+      });
+    }
 
     this.toggleEditBtn.addEventListener("click", () => {
       const isHidden = this.jsonEditorWrapper.classList.toggle("hidden");

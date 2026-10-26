@@ -795,48 +795,152 @@ body {
   gap: 10px;
 }
 
+/* Mobile Tab Navigation (Hidden on Desktop) */
+.mobile-tabs {
+  display: none;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 4px 8px;
+  gap: 8px;
+}
+
+.mobile-tab-btn {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.mobile-tab-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-light);
+}
+
 /* Responsive */
 @media (max-width: 900px) {
+  .mobile-tabs {
+    display: flex;
+  }
+
   .main-content {
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr 280px;
+    display: block;
+    position: relative;
+    overflow: hidden;
+    flex: 1;
   }
-  .sheet-panel {
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
+
+  /* Default on mobile: Show sheet, hide monitor */
+  .sheet-panel, .monitor-panel {
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
   }
-  .monitor-panel {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    padding: 10px;
+
+  .main-content.tab-sheet .sheet-panel {
+    display: flex;
   }
-  .score-notes-card {
-    grid-column: span 2;
+  .main-content.tab-sheet .monitor-panel {
+    display: none !important;
+  }
+
+  .main-content.tab-monitor .sheet-panel {
+    display: none !important;
+  }
+  .main-content.tab-monitor .monitor-panel {
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 12px;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .sheet-container {
+    padding: 8px;
+  }
+
+  .canvas-wrapper {
+    max-width: 100%;
+  }
+
+  .sheet-img, .sheet-canvas {
+    max-width: 100%;
+    height: auto;
   }
 }
 
 @media (max-width: 600px) {
   .app-header {
     height: auto;
-    padding: 10px 14px;
+    padding: 8px 12px;
     flex-direction: column;
-    gap: 8px;
-    align-items: flex-start;
+    gap: 6px;
+    align-items: stretch;
   }
+
+  .logo-group h1 {
+    font-size: 1rem;
+  }
+
   .header-actions {
-    width: 100%;
+    display: flex;
     flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .header-actions .btn {
+    flex: 1 1 calc(50% - 6px);
+    padding: 6px 8px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+
+  .panel-header {
+    padding: 0 10px;
+    height: 42px;
+  }
+
+  .panel-header h2 {
+    font-size: 0.85rem;
+  }
+
+  .player-bar {
+    padding: 8px 12px;
     gap: 8px;
   }
-  .monitor-panel {
-    grid-template-columns: 1fr;
-  }
-  .score-notes-card {
-    grid-column: span 1;
-  }
+
   .controls-wrapper {
-    flex-direction: column;
-    align-items: flex-start;
+    gap: 8px;
+    justify-content: space-between;
+  }
+
+  .ctrl-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 0.85rem;
+  }
+
+  .ctrl-btn.play-btn {
+    width: 42px;
+    height: 42px;
+    font-size: 1.05rem;
+  }
+
+  .slider-group {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .slider-group span {
+    font-size: 0.75rem;
   }
 }
+
