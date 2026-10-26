@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>二胡 数字譜スマートプレイヤー (Erhu Jianpu AI Player)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- PDF.js CDN for PDF Rendering -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  </script>
+
+  <!-- WebAudioFont Player & Real Instrument Soundfont CDN -->
+  <script src="https://surikov.github.io/webaudiofont/npm/dist/WebAudioFontPlayer.js"></script>
+  <!-- 1100: Fiddle / Ethnic Bowed Strings (GeneralUser GS) -->
+  <script src="https://surikov.github.io/webaudiofontdata/sound/1100_GeneralUserGS_sf2_file.js"></script>
+  <!-- 0401: Acoustic Violin (FluidR3) -->
+  <script src="https://surikov.github.io/webaudiofontdata/sound/0401_FluidR3_GM_sf2_file.js"></script>
+  <!-- 0420: Cello (GeneralUser GS) -->
+  <script src="https://surikov.github.io/webaudiofontdata/sound/0420_GeneralUserGS_sf2_file.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-group">
+        <span class="icon">🎻</span>
+        <div>
+          <h1>二胡 数字譜スマートプレイヤー</h1>
+          <p class="subtitle">実機サンプリング音源 × DeepSeek AI 楽譜自動認識</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="deepseekModalBtn" class="btn btn-deepseek" title="DeepSeek APIで楽譜を自動解析">
+          🤖 DeepSeekで譜面解析
+        </button>
+        <label class="btn btn-secondary upload-btn" title="数字譜PDFまたは画像を選択">
+          <span>📂 楽譜ファイル読込</span>
+          <input type="file" id="fileInput" accept=".pdf,image/*">
+        </label>
+        <button id="demoSongBtn" class="btn btn-accent" title="教本サンプル「邀請舞曲」をロード">
+          🎵 サンプル「邀請舞曲」
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="main-content">
+      <!-- Left Panel: Sheet Music View -->
+      <section class="panel sheet-panel">
+        <div class="panel-header">
+          <h2>📄 数字譜ビューアー & 追従カーソル</h2>
+          <div class="zoom-controls">
+            <button id="zoomOutBtn" class="tool-btn" title="縮小">−</button>
+            <span id="zoomLevel">100%</span>
+            <button id="zoomInBtn" class="tool-btn" title="拡大">＋</button>
+            <button id="toggleOverlayBtn" class="tool-btn active" title="演奏位置ハイライトの表示切替">🎯 ハイライトON</button>
+          </div>
+        </div>
+        <div class="sheet-container" id="sheetContainer">
+          <div class="canvas-wrapper" id="canvasWrapper">
+            <!-- Scanned Sheet Image or PDF Render -->
+            <img id="sheetImage" src="page_0.png" alt="二胡数字譜" class="sheet-img">
+            <canvas id="pdfCanvas" class="sheet-canvas hidden"></canvas>
+            <!-- Highlight cursor overlay for current playing note -->
+            <div id="noteCursor" class="note-cursor hidden"></div>
+          </div>
+        </div>
+        <div class="sheet-footer-info">
+          <span id="sheetInfoText">曲名: 邀請舞曲 (1=G調, 2/4拍子)</span>
+          <span class="sheet-hint">💡 楽譜上の音符チップをクリックすると、その位置から再生できます</span>
+        </div>
+      </section>
+
+      <!-- Right Panel: Erhu Fingering & Playback Monitor -->
+      <aside class="panel monitor-panel">
+        <!-- Current Note Card -->
+        <div class="card current-note-card">
+          <div class="card-title">現在の演奏音</div>
+          <div class="note-display">
+            <div class="main-jianpu-note" id="curJianpu">5<span class="dot-below">.</span></div>
+            <div class="note-details">
+              <div class="detail-row"><span class="label">音名:</span> <span id="curPitch" class="val">D4 (内弦)</span></div>
+              <div class="detail-row"><span class="label">運指:</span> <span id="curFinger" class="val">0 (開放弦)</span></div>
+              <div class="detail-row"><span class="label">弓向:</span> <span id="curBow" class="val">⊓ (引き弓)</span></div>
+              <div class="detail-row"><span class="label">小節:</span> <span id="curMeasure" class="val">第 1 小節</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Erhu Fretboard / String Visualizer -->
+        <div class="card erhu-visualizer-card">
+          <div class="card-title">二胡 運指ガイド (1=G: 内弦D / 外弦A)</div>
+          <div class="erhu-strings">
+            <!-- Inner String (内弦: D4) -->
+            <div class="string-lane" id="innerStringLane">
+              <div class="string-header">
+                <span class="string-name">内弦 (D4)</span>
+                <span class="string-label">低音</span>
+              </div>
+              <div class="string-rod">
+                <div class="finger-marker open" data-finger="0">0 (D4) 5̣</div>
+                <div class="finger-marker f1" data-finger="1">1 (E4) 6̣</div>
+                <div class="finger-marker f2" data-finger="2">2 (F#4) 7̣</div>
+                <div class="finger-marker f3" data-finger="3">3 (G4) 1</div>
+                <div class="finger-marker f4" data-finger="4">4 (A4) 2</div>
+                <div class="string-active-indicator" id="innerIndicator"></div>
+              </div>
+            </div>
+            <!-- Outer String (外弦: A4) -->
+            <div class="string-lane" id="outerStringLane">
+              <div class="string-header">
+                <span class="string-name">外弦 (A4)</span>
+                <span class="string-label">高音</span>
+              </div>
+              <div class="string-rod">
+                <div class="finger-marker open" data-finger="0">0 (A4) 2</div>
+                <div class="finger-marker f1" data-finger="1">1 (B4) 3</div>
+                <div class="finger-marker f2" data-finger="2">2 (C5) 4</div>
+                <div class="finger-marker f3" data-finger="3">3 (D5) 5</div>
+                <div class="finger-marker f4" data-finger="4">4 (E5) 6</div>
+                <div class="string-active-indicator" id="outerIndicator"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Score Sequence View & Manual Edit -->
+        <div class="card score-notes-card">
+          <div class="card-header-flex">
+            <span class="card-title">音符リスト (クリックでジャンプ/編集)</span>
+            <div class="card-header-btns">
+              <button id="addNoteBtn" class="text-btn">＋音追加</button>
+              <button id="toggleEditBtn" class="text-btn">JSON編集</button>
+            </div>
+          </div>
+          <div class="notes-chip-container" id="notesChipContainer">
+            <!-- Dynamically populated chips -->
+          </div>
+          <div id="jsonEditorWrapper" class="json-editor-wrapper hidden">
+            <textarea id="jsonText" spellcheck="false"></textarea>
+            <button id="applyJsonBtn" class="btn btn-secondary btn-sm">楽譜データを更新</button>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Bottom Player Control Bar -->
+    <footer class="player-bar">
+      <!-- Progress Track -->
+      <div class="progress-bar-container" id="progressBarContainer">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+
+      <div class="controls-wrapper">
+        <!-- Play / Stop / Step Controls -->
+        <div class="playback-buttons">
+          <button id="btnPrev" class="ctrl-btn" title="前の音符">⏮</button>
+          <button id="btnPlay" class="ctrl-btn play-btn" title="再生/一時停止">▶</button>
+          <button id="btnStop" class="ctrl-btn" title="停止">⏹</button>
+          <button id="btnNext" class="ctrl-btn" title="次の音符">⏭</button>
+          <button id="btnLoop" class="ctrl-btn toggle" title="リピート練習 (ループ)">🔁</button>
+        </div>
+
+        <!-- Sound & Playing Parameters -->
+        <div class="settings-group">
+          <!-- Sound Engine Selector -->
+          <div class="setting-item">
+            <label for="soundSelect">音源方式:</label>
+            <select id="soundSelect">
+              <option value="soundfont_fiddle">🎻 実機サンプリング (Fiddle/胡琴)</option>
+              <option value="soundfont_violin">🎻 実機サンプリング (Violin/擦弦)</option>
+              <option value="erhu_synth">⚡ 二胡専用フィジカルモデリング (揉弦・滑音)</option>
+              <option value="acoustic_simple">🎵 アコースティック弦</option>
+            </select>
+          </div>
+
+          <!-- Portamento / Expressive Vibrato -->
+          <div class="setting-item">
+            <label for="vibratoDepth">ビブラート (揉弦):</label>
+            <input type="range" id="vibratoDepth" min="0" max="100" value="70">
+          </div>
+
+          <!-- Tempo -->
+          <div class="setting-item">
+            <label for="tempoSlider">テンポ (BPM): <span id="tempoValue">88</span></label>
+            <input type="range" id="tempoSlider" min="40" max="160" value="88">
+          </div>
+
+          <!-- Metronome Toggle -->
+          <div class="setting-item checkbox-item">
+            <label><input type="checkbox" id="metroToggle" checked> メトロノーム</label>
+          </div>
+        </div>
+
+        <div class="time-display">
+          <span id="timeCurrent">00:00</span> / <span id="timeTotal">00:00</span>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- DeepSeek AI Modal Dialog -->
+  <div id="deepseekModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>🤖 DeepSeek AI 楽譜自動認識設定</h3>
+        <button id="closeModalBtn" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          お持ちのDeepSeek APIキーを設定することで、読み込んだ二胡の数字譜PDF/画像から音符、小節、調号、運指を自動抽出して演奏データに変換します。
+        </p>
+
+        <div class="form-group">
+          <label for="apiKeyInput">DeepSeek API Key (sk-...):</label>
+          <input type="password" id="apiKeyInput" placeholder="sk-..." class="text-input" autocomplete="off">
+          <small class="help-text">※APIキーはお使いのブラウザ内（LocalStorage）にのみ安全に保存され、外部サーバーには送信されません。</small>
+        </div>
+
+        <div class="form-group">
+          <label for="modelSelect">解析モデル:</label>
+          <select id="modelSelect" class="text-input">
+            <option value="deepseek-chat">deepseek-chat (V3)</option>
+            <option value="deepseek-reasoner">deepseek-reasoner (R1推論モデル)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>現在の対象譜面:</label>
+          <div class="current-target-preview">
+            <span id="targetSheetName">教本スキャン画像 (page_0.png)</span>
+          </div>
+        </div>
+
+        <div id="aiProgressArea" class="ai-progress-area hidden">
+          <div class="spinner"></div>
+          <span id="aiProgressText">DeepSeek APIに画像を送信して数字譜を解析中...</span>
+        </div>
+
+        <div id="aiErrorArea" class="ai-error-box hidden"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="cancelModalBtn" class="btn btn-secondary">キャンセル</button>
+        <button id="runAiBtn" class="btn btn-deepseek">✨ DeepSeekで解析実行</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
