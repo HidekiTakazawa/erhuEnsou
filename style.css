@@ -58,19 +58,24 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  width: 100vw;
+  height: 100dvh;
+  width: 100%;
+  overflow: hidden;
 }
 
 /* Header */
 .app-header {
-  height: 64px;
+  min-height: 56px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  padding: 0 20px;
+  padding: 8px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   z-index: 10;
+  flex-shrink: 0;
 }
 
 .logo-group {
@@ -170,6 +175,7 @@ body {
 /* Main Split View */
 .main-content {
   flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 1fr 380px;
   overflow: hidden;
@@ -179,17 +185,21 @@ body {
 .panel {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 
 .panel-header {
-  height: 48px;
-  padding: 0 16px;
+  min-height: 44px;
+  padding: 6px 14px;
   background: rgba(26, 30, 40, 0.6);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .panel-header h2 {
@@ -240,11 +250,13 @@ body {
 
 .sheet-container {
   flex: 1;
+  min-height: 0;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding: 20px;
+  padding: 16px;
   position: relative;
 }
 
@@ -255,7 +267,6 @@ body {
   border-radius: 4px;
   transform-origin: top center;
   transition: transform 0.15s ease-out;
-  min-width: 580px;
   max-width: 900px;
   width: 100%;
 }
@@ -843,24 +854,29 @@ body {
   border-color: var(--accent-light);
 }
 
-/* Responsive */
-@media (max-width: 900px) {
+/* Responsive: iPad Mini (<= 1024px) & Smartphones (<= 640px) */
+@media (max-width: 1024px) {
   .mobile-tabs {
     display: flex;
+    flex-shrink: 0;
   }
 
   .main-content {
-    display: block;
+    display: flex;
+    flex-direction: column;
     position: relative;
     overflow: hidden;
     flex: 1;
+    min-height: 0;
   }
 
-  /* Default on mobile: Show sheet, hide monitor */
+  /* Default on mobile/tablet: Show sheet, hide monitor */
   .sheet-panel, .monitor-panel {
     width: 100%;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .main-content.tab-sheet .sheet-panel {
@@ -878,7 +894,8 @@ body {
     flex-direction: column;
     padding: 12px;
     gap: 12px;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
   }
 
@@ -895,19 +912,29 @@ body {
     max-width: 100%;
     height: auto;
   }
+
+  .player-bar {
+    flex-shrink: 0;
+    padding: 8px 14px 10px;
+    gap: 8px;
+  }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .app-header {
     height: auto;
-    padding: 8px 12px;
+    padding: 6px 10px;
     flex-direction: column;
     gap: 6px;
     align-items: stretch;
   }
 
   .logo-group h1 {
-    font-size: 1rem;
+    font-size: 0.95rem;
+  }
+
+  .logo-group .subtitle {
+    display: none;
   }
 
   .header-actions {
@@ -917,28 +944,39 @@ body {
   }
 
   .header-actions .btn {
-    flex: 1 1 calc(50% - 6px);
+    flex: 1 1 auto;
     padding: 6px 8px;
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     white-space: nowrap;
   }
 
   .panel-header {
-    padding: 0 10px;
-    height: 42px;
+    padding: 6px 10px;
+    min-height: 38px;
   }
 
   .panel-header h2 {
-    font-size: 0.85rem;
+    font-size: 0.82rem;
+  }
+
+  .sheet-footer-info {
+    height: auto;
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    flex-wrap: wrap;
+  }
+
+  .sheet-hint {
+    display: none;
   }
 
   .player-bar {
-    padding: 8px 12px;
-    gap: 8px;
+    padding: 6px 10px 8px;
+    gap: 6px;
   }
 
   .controls-wrapper {
-    gap: 8px;
+    gap: 6px;
     justify-content: space-between;
   }
 
@@ -949,19 +987,30 @@ body {
   }
 
   .ctrl-btn.play-btn {
-    width: 42px;
-    height: 42px;
-    font-size: 1.05rem;
+    width: 40px;
+    height: 40px;
+    font-size: 1rem;
   }
 
-  .slider-group {
-    flex-direction: row;
-    align-items: center;
-    gap: 6px;
+  .settings-group {
+    width: 100%;
+    gap: 8px;
+    justify-content: space-between;
   }
 
-  .slider-group span {
-    font-size: 0.75rem;
+  .setting-item {
+    font-size: 0.72rem;
+    gap: 4px;
+  }
+
+  .setting-item select {
+    max-width: 150px;
+    font-size: 0.72rem;
+    padding: 2px 4px;
+  }
+
+  .setting-item input[type="range"] {
+    width: 65px;
   }
 }
 

@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>二胡 数字譜 ➔ MusicXML 変換＆エディタ (Erhu Jianpu to MusicXML)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- PDF.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+  <!-- OpenSheetMusicDisplay (OSMD) CDN for MusicXML Rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.8.8/build/opensheetmusicdisplay.min.js"></script>
+  <link rel="stylesheet" href="musicxml_app.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-group">
+        <span class="logo-icon">🎼</span>
+        <div>
+          <h1>二胡数字譜 ➔ MusicXML コンバーター &amp; エディタ</h1>
+          <p class="subtitle">AI (Gemini / DeepSeek) による二胡数字譜解析 ➔ MusicXML生成・プレビュー・編集・エクスポート</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btnSwitchToPlayer" class="btn btn-secondary" onclick="window.musicXmlApp ? window.musicXmlApp.switchToTraditionalPlayer() : (window.location.href='index.html')" title="現在の楽譜データを引き継いで二胡運指プレイヤーを開きます">
+          🎻 従来のプレイヤーを開く
+        </button>
+        <button id="btnOpenApiModal" class="btn btn-primary">
+          ⚙️ AIエンジン設定 (Gemini / DeepSeek)
+        </button>
+        <button id="btnShowHelp" class="btn btn-ghost" title="使い方と汎用アプリ連携ガイド">
+          ❓ 汎用ソフトでの再生方法
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="workspace-grid">
+      <!-- Left Column: Source PDF/Image Preview -->
+      <section class="panel source-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="icon">📄</span>
+            <span>元楽譜（PDF / スキャン画像）</span>
+          </div>
+          <div class="source-actions">
+            <label class="btn btn-sm btn-accent" for="fileInput">
+              📂 PDF/画像を開く
+            </label>
+            <input type="file" id="fileInput" accept="application/pdf,image/*,.musicxml,.xml,text/xml,application/xml" class="hidden">
+            <label class="btn btn-sm btn-secondary" for="musicXmlFileInput" title="端末やGoogleドライブアプリ内のMusicXML(.musicxml/.xml)を直接読み込む">
+              📥 MusicXML読込
+            </label>
+            <input type="file" id="musicXmlFileInput" class="hidden">
+            <button id="btnOpenGDriveModal" class="btn btn-sm btn-secondary" title="共有しているGoogleドライブのリンクやブックマークからMusicXMLを読み込む">
+              ☁️ Googleドライブ
+            </button>
+            <button id="btnLoadSample" class="btn btn-sm btn-ghost" title="サンプル「邀請舞曲」を読み込む">
+              サンプル楽譜
+            </button>
+          </div>
+        </div>
+
+        <div class="source-viewport" id="sourceViewport">
+          <div id="dropZone" class="drop-zone hidden">
+            <p>PDFまたは画像ファイルをここにドラッグ＆ドロップ</p>
+          </div>
+          <div class="canvas-container" id="canvasContainer">
+            <img id="imagePreview" alt="楽譜プレビュー" class="preview-media hidden">
+            <canvas id="pdfCanvas" class="preview-media"></canvas>
+          </div>
+        </div>
+
+        <div class="panel-footer source-footer">
+          <div class="file-meta">
+            <span id="fileNameLabel">あい二胡2-9.pdf (サンプル)</span>
+            <span id="pageInfoLabel" class="badge">1 ページ</span>
+          </div>
+          <button id="btnAnalyzeDeepSeek" class="btn btn-ai pulse">
+            <span class="ai-spark">✨</span> <span id="analyzeBtnText">AIでMusicXMLを生成</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Right Column: MusicXML Editor & Score Preview -->
+      <section class="panel target-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="icon">🎼</span>
+            <span>MusicXML 楽譜プレビュー &amp; 編集</span>
+          </div>
+          <div class="tab-group">
+            <button class="tab-btn active" data-tab="renderedScore">五線譜プレビュー</button>
+            <button class="tab-btn" data-tab="noteTable">音符リスト編集</button>
+            <button class="tab-btn" data-tab="xmlEditor">XMLコード</button>
+          </div>
+        </div>
+
+        <!-- Always-visible Playback & Zoom Controls Bar -->
+        <div class="score-controls-bar">
+          <div class="playback-controls">
+            <button id="btnPlayScore" class="btn btn-sm btn-primary play-score-btn" title="試聴再生">▶ 再生</button>
+            <button id="btnStopScore" class="btn btn-sm btn-secondary" title="停止">⏹ 停止</button>
+            <div class="tempo-control">
+              <label for="playbackTempo">テンポ:</label>
+              <input type="range" id="playbackTempo" min="40" max="200" value="88">
+              <span id="tempoDisplay">88 BPM</span>
+            </div>
+          </div>
+          <div class="score-zoom">
+            <button id="btnZoomOut" class="btn btn-xs btn-ghost">−</button>
+            <span id="scoreZoomVal">100%</span>
+            <button id="btnZoomIn" class="btn btn-xs btn-ghost">＋</button>
+          </div>
+        </div>
+
+        <!-- Tab 1: Rendered Sheet Music (OSMD) -->
+        <div class="tab-content active" id="tabRenderedScore">
+          <div class="rendered-score-wrapper" id="renderedScoreWrapper">
+            <div id="osmdCanvas" class="osmd-container"></div>
+            <div id="scorePlaceholder" class="empty-placeholder hidden">
+              <div class="empty-icon">🎵</div>
+              <h3>MusicXMLデータがまだ読み込まれていません</h3>
+              <p>左側の「✨ AIでMusicXMLを生成」を実行するか、サンプルMusicXMLを読み込んでください。</p>
+              <button id="btnLoadSampleXml" class="btn btn-sm btn-primary mt-2">サンプルMusicXML（邀請舞曲）を表示</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Note Table Editor -->
+        <div class="tab-content" id="tabNoteTable">
+          <div class="table-toolbar">
+            <div class="song-meta-inputs">
+              <div class="meta-field">
+                <label>曲名:</label>
+                <input type="text" id="metaTitle" value="邀請舞曲" class="input-sm">
+              </div>
+              <div class="meta-field">
+                <label>調号:</label>
+                <select id="metaKey" class="select-sm">
+                  <option value="1=G">1=G (ト長調 / ♯1)</option>
+                  <option value="1=D">1=D (ニ長調 / ♯2)</option>
+                  <option value="1=F">1=F (ヘ長調 / ♭1)</option>
+                  <option value="1=C">1=C (ハ長調 / ♭0)</option>
+                  <option value="1=Bb">1=B♭ (変ロ長調 / ♭2)</option>
+                  <option value="1=A">1=A (イ長調 / ♯3)</option>
+                </select>
+              </div>
+              <div class="meta-field">
+                <label>拍子:</label>
+                <select id="metaTime" class="select-sm">
+                  <option value="2/4">2/4拍子</option>
+                  <option value="3/4">3/4拍子</option>
+                  <option value="4/4">4/4拍子</option>
+                  <option value="6/8">6/8拍子</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-actions">
+              <button id="btnAddNoteRow" class="btn btn-sm btn-secondary">＋ 音符追加</button>
+              <button id="btnApplyTableChanges" class="btn btn-sm btn-accent">XMLに反映 ➔</button>
+            </div>
+          </div>
+          <div class="note-table-wrapper">
+            <table class="note-table" id="noteTable">
+              <thead>
+                <tr>
+                  <th style="width: 50px;">小節</th>
+                  <th style="width: 70px;">数字譜</th>
+                  <th style="width: 90px;">音名</th>
+                  <th style="width: 65px;">オクターブ</th>
+                  <th style="width: 90px;">音価(長さ)</th>
+                  <th style="width: 60px;">付点</th>
+                  <th style="width: 65px;">休符</th>
+                  <th style="width: 70px;">弦</th>
+                  <th style="width: 50px;">指</th>
+                  <th style="width: 50px;">弓</th>
+                  <th style="width: 50px;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="noteTableBody">
+                <!-- Rows dynamically injected -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 3: Raw XML Editor -->
+        <div class="tab-content" id="tabXmlEditor">
+          <div class="xml-editor-toolbar">
+            <span class="code-badge">MusicXML 3.1 / UTF-8</span>
+            <div class="xml-actions">
+              <button id="btnFormatXml" class="btn btn-sm btn-ghost">整頓 (Format)</button>
+              <button id="btnApplyXmlCode" class="btn btn-sm btn-accent">楽譜＆テーブルに適用</button>
+            </div>
+          </div>
+          <div class="editor-container">
+            <textarea id="xmlCodeArea" spellcheck="false" placeholder="ここにMusicXMLコードが表示・直接編集できます..."></textarea>
+          </div>
+        </div>
+
+        <!-- Bottom Action Bar: Export & Download -->
+        <div class="panel-footer target-footer">
+          <div class="status-indicator">
+            <span class="status-dot ready"></span>
+            <span id="exportStatusText">MusicXMLデータ準備完了</span>
+          </div>
+          <div class="export-btn-group">
+            <button id="btnCopyXml" class="btn btn-secondary">
+              📋 XMLをコピー
+            </button>
+            <button id="btnDownloadXml" class="btn btn-download">
+              💾 MusicXMLをダウンロード (.musicxml)
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal: AI API Configuration (Gemini & DeepSeek) -->
+  <div id="apiModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">🤖</span>
+          <h3>AIエンジン &amp; API設定</h3>
+        </div>
+        <button id="btnCloseApiModal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          二胡数字譜を高精度にMusicXMLへ変換するためのAIモデルを選択・設定できます。<br>
+          APIキーはお使いのブラウザ（LocalStorage）にのみ安全に保存されます。
+        </p>
+
+        <!-- AI Engine Provider Selection -->
+        <div class="form-group">
+          <label for="selectAiProvider">使用するAIエンジン:</label>
+          <select id="selectAiProvider" class="select-text">
+            <option value="gemini" selected>Google Gemini (画像・重奏楽譜の認識精度が極めて高く推奨)</option>
+            <option value="deepseek">DeepSeek (deepseek-chat / deepseek-reasoner)</option>
+          </select>
+        </div>
+
+        <!-- Gemini Settings -->
+        <div id="geminiConfigGroup" class="provider-config">
+          <div class="form-group">
+            <label for="inputGeminiApiKey">Gemini API Key (<code>AIza...</code>):</label>
+            <input type="password" id="inputGeminiApiKey" placeholder="AIzaSy..." class="input-text">
+            <small style="color: var(--text-muted); display: block; margin-top: 4px;">Google AI Studio (<a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: var(--accent-gold);">aistudio.google.com</a>) から無料で即座に取得できます。</small>
+          </div>
+          <div class="form-group">
+            <label for="selectGeminiModel">Geminiモデル:</label>
+            <select id="selectGeminiModel" class="select-text">
+              <option value="gemini-2.5-flash" selected>gemini-2.5-flash (高速・最新・高精度)</option>
+              <option value="gemini-1.5-pro">gemini-1.5-pro (最高峰の認識推論能力)</option>
+              <option value="gemini-1.5-flash">gemini-1.5-flash (標準・軽量)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- DeepSeek Settings -->
+        <div id="deepseekConfigGroup" class="provider-config hidden">
+          <div class="form-group">
+            <label for="inputApiKey">DeepSeek API Key (<code>sk-...</code>):</label>
+            <input type="password" id="inputApiKey" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx" class="input-text">
+          </div>
+          <div class="form-group">
+            <label for="selectAiModel">DeepSeekモデル:</label>
+            <select id="selectAiModel" class="select-text">
+              <option value="deepseek-chat" selected>deepseek-chat (標準)</option>
+              <option value="deepseek-reasoner">deepseek-reasoner (思考推論)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-tip">
+          <strong>💡 ヒント:</strong>
+          きらきら星のような「主旋律（二胡I）＋伴奏（二胡II）」の2段譜・重奏譜は、画像認識力に優れた <strong>Gemini</strong> を利用すると段の混同が起きず、最も美しいMusicXMLが生成されます。
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnSaveApiKey" class="btn btn-primary">設定を保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Google Drive Shared MusicXML Loader & Library -->
+  <div id="gdriveModal" class="modal-backdrop hidden">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">☁️</span>
+          <h3>Googleドライブ共有 MusicXML 読み込み &amp; 共有曲リスト</h3>
+        </div>
+        <button id="btnCloseGDriveModal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          共有しているGoogleドライブ上のMusicXMLファイル（<code>.musicxml</code> / <code>.xml</code>）を、<strong>共有リンク（URL）</strong>または<strong>端末のGoogleドライブ連携</strong>から直接読み込めます。
+        </p>
+
+        <!-- Section 1: Direct URL Load & Register -->
+        <div class="provider-config" style="margin-bottom: 16px;">
+          <h4 style="margin-bottom: 8px; color: var(--accent-gold);">① Googleドライブの共有リンク（URL）から直接読み込む</h4>
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 10px;">
+            Googleドライブで対象ファイルを右クリック（または「…」メニュー）➔「共有」➔「一般的なアクセス：<strong>リンクを知っている全員</strong>」に設定し、「リンクをコピー」して下に貼り付けてください。
+          </p>
+          <div class="form-group" style="margin-bottom: 10px;">
+            <label for="inputGDriveUrl">ファイルの共有URL（またはファイルID）:</label>
+            <input type="text" id="inputGDriveUrl" placeholder="https://drive.google.com/file/d/1aBcDeFgHiJkLmNoPqRsTuVwXyZ/view?usp=sharing" class="input-text">
+          </div>
+          <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+            <div class="form-group" style="flex: 1; min-width: 180px; margin-bottom: 0;">
+              <label for="inputGDriveTitle">曲名メモ（リスト保存用・任意）:</label>
+              <input type="text" id="inputGDriveTitle" placeholder="例: ふるさと (G調)" class="input-text">
+            </div>
+            <button id="btnLoadGDriveUrl" class="btn btn-primary" style="height: 38px;">
+              📥 今すぐ読み込む（＆リスト登録）
+            </button>
+          </div>
+          <div id="gdriveLoadStatus" style="margin-top: 8px; font-size: 0.85rem; color: var(--accent-gold);" class="hidden"></div>
+        </div>
+
+        <!-- Section 2: Saved Shared Files Library -->
+        <div class="provider-config" style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+            <h4 style="color: var(--text-main); margin: 0;">② 登録済みのGoogleドライブ共有曲リスト（ワンクリック読込）</h4>
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <input type="text" id="inputGDriveFolderUrl" placeholder="共有フォルダURLを登録..." class="input-sm" style="width: 190px;">
+              <button id="btnSaveGDriveFolder" class="btn btn-xs btn-secondary" title="共有フォルダのURLを保存">保存</button>
+              <a id="linkOpenGDriveFolder" href="https://drive.google.com" target="_blank" rel="noopener" class="btn btn-xs btn-accent" style="text-decoration: none;">📂 共有フォルダを開く ↗</a>
+            </div>
+          </div>
+          <div id="gdriveLibraryList" style="max-height: 190px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px; background: rgba(0,0,0,0.2);">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Section 3: Device File Picker Tip -->
+        <div class="modal-tip" style="margin-top: 8px;">
+          <strong>💡 PC / iPad Mini / スマホの「ファイル選択」から直接指定する場合:</strong><br>
+          これまでiPadやスマホのGoogleドライブで <code>.musicxml</code> ファイルがグレーアウトして選べなかった制限を解除しました。<br>
+          下の <strong>「📁 端末／Googleドライブアプリからファイルを選択」</strong> ボタンを押すと、PC版Googleドライブ（G:ドライブ等）や、iPad/スマホの「ファイル」アプリ内にあるGoogleドライブ共有フォルダから直接 <code>.musicxml</code> を選択できます。
+          <div style="margin-top: 8px;">
+            <label for="musicXmlFileInput" class="btn btn-sm btn-accent" style="cursor: pointer; display: inline-block;" onclick="document.getElementById('gdriveModal').classList.add('hidden');">
+              📁 端末／Googleドライブアプリからファイルを選択
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCloseGDriveModalBtn" class="btn btn-secondary">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: MuseScore & External Player Guide -->
+  <div id="helpModal" class="modal-backdrop hidden">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">📖</span>
+          <h3>作成したMusicXMLを汎用アプリで演奏・活用する方法</h3>
+        </div>
+        <button id="btnCloseHelpModal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body help-body">
+        <div class="guide-step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <h4>MusicXMLファイルをダウンロード</h4>
+            <p>画面右下の「<strong>💾 MusicXMLをダウンロード</strong>」ボタンを押すと、<code>曲名.musicxml</code> ファイルがPCに保存されます。</p>
+          </div>
+        </div>
+
+        <div class="guide-step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <h4>無料の楽譜・演奏ソフト「MuseScore（ミューズスコア）」で開く（一番おすすめ）</h4>
+            <p>世界で最も普及している完全無料のオープンソース楽譜作成・演奏ソフトです：</p>
+            <ul>
+              <li><strong>公式サイト:</strong> <a href="https://musescore.org/ja" target="_blank" rel="noopener">https://musescore.org/ja</a> から無料ダウンロードできます。</li>
+              <li>MuseScoreを起動し、ダウンロードした <code>.musicxml</code> を「ファイル」➔「開く」で読み込むだけで、自動的に美しい楽譜が表示されます。</li>
+              <li>スペースキーを押すだけで、高品質なオーケストラ・弦楽器音源で演奏がスタートします。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="guide-step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <h4>他の汎用アプリでの活用</h4>
+            <ul>
+              <li><strong>MuseScore 4:</strong> テンポ変更、パート追加、移調（キー変更）、MIDIやMP3への書き出しが自由自在。</li>
+              <li><strong>Finale / Sibelius:</strong> プロ向け楽譜作成ソフトでも100%読み込み可能。</li>
+              <li><strong>Soundslice / Flat.io:</strong> Webブラウザ上で動作するオンライン楽譜プレーヤーでもMusicXMLを直接インポートできます。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCloseHelpModalBtn" class="btn btn-secondary">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Progress Overlay during AI recognition -->
+  <div id="aiLoadingOverlay" class="modal-backdrop hidden">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <h3 id="aiStatusTitle">DeepSeek AIで数字譜を解析中...</h3>
+      <p id="aiStatusMessage">画像を最適化し、二胡の音高・音価・拍子をMusicXMLに変換しています。</p>
+      <div class="progress-bar-container">
+        <div id="aiProgressBar" class="progress-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="musicxml_app.js"></script>
+</body>
+</html>

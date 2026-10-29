@@ -109,7 +109,20 @@ const PITCH_TO_MIDI = {
 };
 
 function pitchToMidi(pitch) {
-  return PITCH_TO_MIDI[pitch] || 60;
+  if (!pitch) return 60;
+  if (PITCH_TO_MIDI[pitch]) return PITCH_TO_MIDI[pitch];
+  const m = String(pitch).trim().match(/^([A-Ga-g])([#♯b♭]?)(\d+)$/);
+  if (m) {
+    const semitones = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+    const step = m[1].toUpperCase();
+    const acc = m[2];
+    const oct = parseInt(m[3], 10);
+    let alter = 0;
+    if (acc === "#" || acc === "♯") alter = 1;
+    else if (acc === "b" || acc === "♭") alter = -1;
+    return 12 * (oct + 1) + (semitones[step] ?? 0) + alter;
+  }
+  return 60;
 }
 
 function midiToFrequency(midi) {
@@ -126,13 +139,26 @@ class AdvancedErhuAudioEngine {
     this.instruments = {};
   }
 
-  init() {
+  async init() {
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       this.ctx = new AudioCtx();
     }
     if (this.ctx.state === "suspended") {
-      this.ctx.resume();
+      try {
+        await this.ctx.resume();
+      } catch (e) {
+        console.warn("AudioContext resume warning:", e);
+      }
+    }
+    try {
+      const buf = this.ctx.createBuffer(1, 1, 22050);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.ctx.destination);
+      src.start(0);
+    } catch (e) {
+      // Ignore
     }
 
     if (!this.player && window.WebAudioFontPlayer) {
@@ -150,11 +176,14 @@ class AdvancedErhuAudioEngine {
   }
 
   playNote(pitch, durationSeconds, timeOffset = 0) {
+    if (!pitch || pitch === "rest" || pitch === "0") return;
     this.init();
     const midi = pitchToMidi(pitch);
 
-    // 1. サウンドフォント（実機サンプリング音源）方式
-    if (this.mode.startsWith("soundfont") && this.player && this.instruments[this.mode]) {
+    // 1. サウンドフォント（実機サンプリング音源）方式 (デコード完了確認付き)
+    const instr = this.instruments[this.mode];
+    const isDecoded = instr && Array.isArray(instr.zones) && instr.zones.some(z => z.buffer);
+    if (this.mode.startsWith("soundfont") && this.player && isDecoded) {
       this.playSoundFontNote(midi, durationSeconds, timeOffset);
       return;
     }
@@ -355,6 +384,21 @@ class ErhuApp {
     this.updateCurrentNoteDisplay(0);
     this.updateZoom();
     this.prepareDefaultImageBase64();
+    this.checkSharedBridgeSong();
+  }
+
+  checkSharedBridgeSong() {
+    try {
+      const raw = localStorage.getItem("erhu_shared_song_bridge");
+      if (raw) {
+        const sharedSong = JSON.parse(raw);
+        if (sharedSong && Array.isArray(sharedSong.notes) && sharedSong.notes.length > 0) {
+          this.loadSong(sharedSong);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not load shared bridge song:", e);
+    }
   }
 
   initDom() {
@@ -475,6 +519,7 @@ class ErhuApp {
     });
 
     this.demoSongBtn.addEventListener("click", () => {
+      localStorage.removeItem("erhu_shared_song_bridge");
       this.loadSong(JSON.parse(JSON.stringify(DEMO_SONG)));
       this.sheetImage.classList.remove("hidden");
       this.pdfCanvas.classList.add("hidden");
@@ -591,6 +636,7 @@ class ErhuApp {
 
   loadSong(songData) {
     this.stop();
+    this.normalizeSongData(songData);
     this.song = songData;
     this.tempoSlider.value = this.song.tempo || 88;
     this.tempoValue.textContent = this.song.tempo || 88;
@@ -598,6 +644,116 @@ class ErhuApp {
     this.renderNoteChips();
     this.jumpToNote(0);
     this.updateTotalDurationDisplay();
+  }
+
+  normalizeKey(rawKey) {
+    if (!rawKey) return "1=D";
+    const str = String(rawKey).replace(/＝/g, "=").replace(/\s+/g, "").toUpperCase();
+    if (str.includes("1=BB") || str.includes("1=B♭") || str.includes("BB") || str.includes("B♭") || str.includes("変ロ")) return "1=Bb";
+    if (str.includes("1=D") || str.includes("D調") || str.includes("ニ長") || str.includes("15弦") || str.startsWith("D")) return "1=D";
+    if (str.includes("1=G") || str.includes("G調") || str.includes("ト長") || str.includes("52弦") || str.includes("5.2弦") || str.startsWith("G")) return "1=G";
+    if (str.includes("1=F") || str.includes("F調") || str.includes("ヘ長") || str.includes("63弦") || str.includes("6.3弦") || str.startsWith("F")) return "1=F";
+    if (str.includes("1=C") || str.includes("C調") || str.includes("ハ長") || str.includes("26弦") || str.startsWith("C")) return "1=C";
+    return "1=D";
+  }
+
+  normalizeSongData(songData) {
+    if (!songData || !Array.isArray(songData.notes)) return;
+    const keyMap = {
+      "1=D": {
+        "1": { step: "D", alter: 0, oct: 4, string: "inner", finger: 0 },
+        "2": { step: "E", alter: 0, oct: 4, string: "inner", finger: 1 },
+        "3": { step: "F", alter: 1, oct: 4, string: "inner", finger: 2 },
+        "4": { step: "G", alter: 0, oct: 4, string: "inner", finger: 3 },
+        "5": { step: "A", alter: 0, oct: 4, string: "outer", finger: 0 },
+        "6": { step: "B", alter: 0, oct: 4, string: "outer", finger: 1 },
+        "7": { step: "C", alter: 1, oct: 5, string: "outer", finger: 2 }
+      },
+      "1=G": {
+        "1": { step: "G", alter: 0, oct: 4, string: "inner", finger: 3 },
+        "2": { step: "A", alter: 0, oct: 4, string: "outer", finger: 0 },
+        "3": { step: "B", alter: 0, oct: 4, string: "outer", finger: 1 },
+        "4": { step: "C", alter: 0, oct: 5, string: "outer", finger: 2 },
+        "5": { step: "D", alter: 0, oct: 5, string: "outer", finger: 3 },
+        "6": { step: "E", alter: 0, oct: 5, string: "outer", finger: 4 },
+        "7": { step: "F", alter: 1, oct: 5, string: "outer", finger: 4 }
+      },
+      "1=F": {
+        "1": { step: "F", alter: 0, oct: 4, string: "inner", finger: 2 },
+        "2": { step: "G", alter: 0, oct: 4, string: "inner", finger: 3 },
+        "3": { step: "A", alter: 0, oct: 4, string: "outer", finger: 0 },
+        "4": { step: "B", alter: -1, oct: 4, string: "outer", finger: 1 },
+        "5": { step: "C", alter: 0, oct: 5, string: "outer", finger: 2 },
+        "6": { step: "D", alter: 0, oct: 5, string: "outer", finger: 3 },
+        "7": { step: "E", alter: 0, oct: 5, string: "outer", finger: 4 }
+      },
+      "1=C": {
+        "1": { step: "C", alter: 0, oct: 5, string: "outer", finger: 2 },
+        "2": { step: "D", alter: 0, oct: 5, string: "outer", finger: 3 },
+        "3": { step: "E", alter: 0, oct: 5, string: "outer", finger: 4 },
+        "4": { step: "F", alter: 0, oct: 5, string: "outer", finger: 4 },
+        "5": { step: "G", alter: 0, oct: 5, string: "outer", finger: 4 },
+        "6": { step: "A", alter: 0, oct: 5, string: "outer", finger: 4 },
+        "7": { step: "B", alter: 0, oct: 5, string: "outer", finger: 4 }
+      },
+      "1=Bb": {
+        "1": { step: "B", alter: -1, oct: 4, string: "outer", finger: 1 },
+        "2": { step: "C", alter: 0, oct: 5, string: "outer", finger: 2 },
+        "3": { step: "D", alter: 0, oct: 5, string: "outer", finger: 3 },
+        "4": { step: "E", alter: -1, oct: 5, string: "outer", finger: 4 },
+        "5": { step: "F", alter: 0, oct: 5, string: "outer", finger: 4 },
+        "6": { step: "G", alter: 0, oct: 5, string: "outer", finger: 4 },
+        "7": { step: "A", alter: 0, oct: 5, string: "outer", finger: 4 }
+      }
+    };
+    const normKey = this.normalizeKey(songData.key);
+    songData.key = normKey;
+    const scale = keyMap[normKey] || keyMap["1=D"];
+    const semitones = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+
+    songData.notes.forEach(n => {
+      const jStr = String(n.jianpu || "").trim();
+      if (jStr === "0" || n.pitch === "rest") return;
+      const degMatch = jStr.match(/([1-7])/);
+      if (!degMatch) return;
+      const base = scale[degMatch[1]];
+      if (!base) return;
+
+      let octShift = 0;
+      if (jStr.includes(".") || jStr.includes("｡")) octShift = -1;
+      else if (jStr.includes("^") || jStr.includes("・") || jStr.includes("˙")) octShift = 1;
+
+      if (octShift === -1) {
+        const lowMidi = 12 * (base.oct - 1 + 1) + (semitones[base.step] ?? 0) + base.alter;
+        if (lowMidi < 62) {
+          octShift = 0;
+          n.jianpu = jStr.replace(/[.｡]/g, "");
+        }
+      }
+
+      const finalOct = base.oct + octShift;
+      const acc = base.alter === 1 ? "#" : (base.alter === -1 ? "b" : "");
+      n.pitch = `${base.step}${acc}${finalOct}`;
+      n.midi = 12 * (finalOct + 1) + (semitones[base.step] ?? 0) + base.alter;
+
+      if (n.midi < 69) {
+        n.string = "inner";
+        const diff = n.midi - 62;
+        if (diff <= 0) n.finger = 0;
+        else if (diff <= 2) n.finger = 1;
+        else if (diff <= 4) n.finger = 2;
+        else if (diff <= 5) n.finger = 3;
+        else n.finger = 4;
+      } else {
+        n.string = "outer";
+        const diff = n.midi - 69;
+        if (diff <= 0) n.finger = 0;
+        else if (diff <= 2) n.finger = 1;
+        else if (diff <= 4) n.finger = 2;
+        else if (diff <= 5) n.finger = 3;
+        else n.finger = 4;
+      }
+    });
   }
 
   renderNoteChips() {
@@ -630,8 +786,8 @@ class ErhuApp {
     }
   }
 
-  play() {
-    this.audio.init();
+  async play() {
+    await this.audio.init();
     this.isPlaying = true;
     this.btnPlay.textContent = "⏸";
     this.btnPlay.title = "一時停止";
