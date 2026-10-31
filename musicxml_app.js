@@ -241,9 +241,15 @@ class ErhuMusicXmlApp {
 
     // Note Table
     this.noteTableBody = document.getElementById("noteTableBody");
+    this.noteCheckSummaryBar = document.getElementById("noteCheckSummaryBar");
+    this.quickJianpuInput = document.getElementById("quickJianpuInput");
+    this.btnApplyQuickJianpu = document.getElementById("btnApplyQuickJianpu");
     this.metaTitle = document.getElementById("metaTitle");
     this.metaKey = document.getElementById("metaKey");
     this.metaTime = document.getElementById("metaTime");
+    this.btnCopyNoteList = document.getElementById("btnCopyNoteList");
+    this.btnCopyNoteJson = document.getElementById("btnCopyNoteJson");
+    this.btnCopyNoteListFooter = document.getElementById("btnCopyNoteListFooter");
     this.btnAddNoteRow = document.getElementById("btnAddNoteRow");
     this.btnApplyTableChanges = document.getElementById("btnApplyTableChanges");
 
@@ -416,6 +422,18 @@ class ErhuMusicXmlApp {
     this.btnZoomOut.addEventListener("click", () => this.adjustZoom(-0.15));
 
     // Note Table Actions
+    if (this.btnCopyNoteList) {
+      this.btnCopyNoteList.addEventListener("click", () => this.copyNoteListToClipboard("text"));
+    }
+    if (this.btnCopyNoteJson) {
+      this.btnCopyNoteJson.addEventListener("click", () => this.copyNoteListToClipboard("json"));
+    }
+    if (this.btnCopyNoteListFooter) {
+      this.btnCopyNoteListFooter.addEventListener("click", () => this.copyNoteListToClipboard("text"));
+    }
+    if (this.btnApplyQuickJianpu) {
+      this.btnApplyQuickJianpu.addEventListener("click", () => this.applyQuickJianpuText());
+    }
     this.btnAddNoteRow.addEventListener("click", () => this.addNoteRow());
     this.btnApplyTableChanges.addEventListener("click", () => this.applyTableToXml());
     if (this.metaKey) {
@@ -1516,7 +1534,10 @@ ${measuresXml}  </part>
             <option value="" ${!n.bow ? "selected" : ""}>−</option>
           </select>
         </td>
-        <td><button class="btn btn-xs btn-ghost text-danger" title="削除" onclick="window.musicXmlApp.deleteNoteRow(${idx})">🗑</button></td>
+        <td style="white-space: nowrap;">
+          <button class="btn btn-xs btn-ghost" title="この音を試聴" onclick="window.musicXmlApp.previewSingleNote(${idx})">🔊</button>
+          <button class="btn btn-xs btn-ghost text-danger" title="削除" onclick="window.musicXmlApp.deleteNoteRow(${idx})">🗑</button>
+        </td>
       `;
 
       // Attach change listeners to update object
@@ -1560,6 +1581,284 @@ ${measuresXml}  </part>
       });
 
       this.noteTableBody.appendChild(tr);
+    });
+
+    this.renderNoteCheckSummary();
+  }
+
+  getNoteBeats(n) {
+    if (typeof n.beats === "number" && n.beats > 0) return n.beats;
+    let b = 1.0;
+    if (n.durationType === "16th") b = 0.25;
+    else if (n.durationType === "eighth") b = 0.5;
+    else if (n.durationType === "quarter") b = 1.0;
+    else if (n.durationType === "half") b = 2.0;
+    else if (n.durationType === "whole") b = 4.0;
+    if (n.dot) b *= 1.5;
+    return b;
+  }
+
+  renderNoteCheckSummary() {
+    if (!this.noteCheckSummaryBar || !Array.isArray(this.notes)) return;
+    const [beatsPerMeasureStr] = String(this.meta.timeSignature || "2/4").split("/");
+    const expectedBeats = parseFloat(beatsPerMeasureStr) || 2;
+
+    const measureMap = new Map();
+    this.notes.forEach(n => {
+      const m = n.measure || 1;
+      if (!measureMap.has(m)) measureMap.set(m, { notes: [], totalBeats: 0 });
+      const entry = measureMap.get(m);
+      const b = this.getNoteBeats(n);
+      const durMark = n.durationType === "half" ? " -" : (n.durationType === "whole" ? " - - -" : (n.durationType === "eighth" ? "_" : (n.durationType === "16th" ? "=" : "")));
+      const dotMark = n.dot ? "·" : "";
+      entry.notes.push(`${n.jianpu}${durMark}${dotMark}`);
+      entry.totalBeats += b;
+    });
+
+    const parts = [];
+    const rawMeasureStrings = [];
+    measureMap.forEach((val, mNum) => {
+      const joined = val.notes.join(" ");
+      rawMeasureStrings.push(joined);
+      const isBeatMismatch = Math.abs(val.totalBeats - expectedBeats) > 0.05;
+      const badgeStyle = isBeatMismatch
+        ? "color: #ffb74d; font-weight: bold;"
+        : "color: var(--accent-gold);";
+      const beatNote = isBeatMismatch ? `⚠️(${val.totalBeats}拍)` : "";
+      parts.push(`<span style="margin-right: 12px; display: inline-block;"><strong style="${badgeStyle}">[${mNum}小節]</strong> ${this.escapeXml(joined)} ${beatNote}</span>`);
+    });
+
+    if (this.quickJianpuInput) {
+      this.quickJianpuInput.value = rawMeasureStrings.join(" | ");
+    }
+
+    this.noteCheckSummaryBar.innerHTML = `
+      <div style="color: var(--text-muted); font-size: 0.78rem; margin-bottom: 2px;">
+        🔍 <strong>AI解析・小節別チェック（全 ${measureMap.size} 小節 / ${this.notes.length} 音符 / 基準 ${expectedBeats}拍/小節）</strong> ※下の「✏️ 数字譜テキストで一括修正」欄を書き換えて「⚡ 数字譜テキストを反映」を押すと一括修正できます:
+      </div>
+      <div>${parts.join('<span style="color: rgba(255,255,255,0.2); margin-right: 8px;">|</span>')}</div>
+    `;
+  }
+
+  // Parse quick Jianpu text (e.g. "3_ 3_ 2 | 3_ 3_ 2 | 3_ 5_ 5_ 1_ | 2 - | ...") into this.notes and update XML & OSMD
+  applyQuickJianpuText() {
+    if (!this.quickJianpuInput) return;
+    const rawText = this.quickJianpuInput.value.trim();
+    if (!rawText) {
+      alert("数字譜テキストを入力してください。");
+      return;
+    }
+
+    this.meta.title = this.metaTitle.value.trim() || this.meta.title || "無題";
+    this.meta.key = this.normalizeKey(this.metaKey.value);
+    this.meta.timeSignature = this.metaTime.value;
+
+    const measureChunks = rawText.split(/[|｜]/).map(s => s.trim()).filter(Boolean);
+    const newNotes = [];
+    let bowToggle = 0;
+
+    measureChunks.forEach((mStr, mIdx) => {
+      const measureNum = mIdx + 1;
+      const tokens = mStr.split(/\s+/).filter(Boolean);
+      for (let i = 0; i < tokens.length; i++) {
+        const tok = tokens[i];
+        // If standalone dash "-", extend the previous note in this measure
+        if (tok === "-" || tok === "ー" || tok === "—") {
+          if (newNotes.length > 0) {
+            const prev = newNotes[newNotes.length - 1];
+            const prevBeats = this.getNoteBeats(prev) + 1.0;
+            prev.beats = prevBeats;
+            if (Math.abs(prevBeats - 2.0) < 0.1) { prev.durationType = "half"; prev.dot = false; }
+            else if (Math.abs(prevBeats - 3.0) < 0.1) { prev.durationType = "half"; prev.dot = true; }
+            else if (Math.abs(prevBeats - 4.0) < 0.1) { prev.durationType = "whole"; prev.dot = false; }
+          }
+          continue;
+        }
+
+        // Parse duration markers: "=" (16th), "_" (eighth), none (quarter)
+        let durationType = "quarter";
+        if (tok.includes("=")) durationType = "16th";
+        else if (tok.includes("_")) durationType = "eighth";
+
+        // Check rhythmic dot "·"
+        const hasRhythmicDot = tok.includes("·");
+
+        // Clean jianpu core (keep #/b, 0-7, low dot ".", high "^"/"・")
+        let cleanJianpu = tok.replace(/[_=·]/g, "");
+        if (!cleanJianpu) continue;
+
+        const isRest = cleanJianpu === "0";
+        const noteObj = {
+          measure: measureNum,
+          jianpu: isRest ? "0" : cleanJianpu,
+          step: isRest ? "rest" : "D",
+          octave: 4,
+          alter: 0,
+          durationType,
+          dot: hasRhythmicDot,
+          isRest,
+          string: "inner",
+          finger: 0,
+          bow: isRest ? "" : (bowToggle % 2 === 0 ? "⊓" : "V")
+        };
+        if (!isRest) bowToggle++;
+        this.normalizeNote(noteObj, true);
+        newNotes.push(noteObj);
+      }
+    });
+
+    if (newNotes.length === 0) {
+      alert("有効な音符が見つかりませんでした。");
+      return;
+    }
+
+    this.notes = newNotes;
+    this.rawImportedXml = null;
+    this.renderNoteTable();
+    this.renderOSMD();
+    if (this.xmlCodeArea) {
+      this.xmlCodeArea.value = this.generateMusicXml();
+    }
+    alert(`✅ 数字譜テキストから全 ${measureChunks.length} 小節（${newNotes.length} 音符）を一括反映し、五線譜を更新しました！`);
+  }
+
+  // Automatically fix common AI measure rhythm misreads (e.g. 2 eighth notes alone in a 2/4 measure -> 2 quarter notes)
+  autoFixMeasureRhythms() {
+    if (!Array.isArray(this.notes) || this.notes.length === 0) return;
+    const [beatsPerMeasureStr] = String(this.meta.timeSignature || "2/4").split("/");
+    const expectedBeats = parseFloat(beatsPerMeasureStr) || 2;
+    if (expectedBeats !== 2) return;
+
+    const byMeasure = new Map();
+    this.notes.forEach(n => {
+      const m = n.measure || 1;
+      if (!byMeasure.has(m)) byMeasure.set(m, []);
+      byMeasure.get(m).push(n);
+    });
+
+    byMeasure.forEach(mNotes => {
+      const totalBeats = mNotes.reduce((acc, n) => acc + this.getNoteBeats(n), 0);
+      // Case 1: 2 eighth notes in a 2/4 measure (total 1.0 beat instead of 2.0 beats, e.g. "| 2 3 |")
+      if (mNotes.length === 2 && Math.abs(totalBeats - 1.0) < 0.05 && mNotes.every(n => n.durationType === "eighth" && !n.dot)) {
+        mNotes.forEach(n => {
+          n.durationType = "quarter";
+          delete n.beats;
+        });
+      }
+      // Case 2: 1 quarter note alone in a 2/4 measure (total 1.0 beat instead of 2.0 beats, e.g. "| 1 - |")
+      if (mNotes.length === 1 && Math.abs(totalBeats - 1.0) < 0.05 && mNotes[0].durationType === "quarter" && !mNotes[0].dot) {
+        mNotes[0].durationType = "half";
+        delete mNotes[0].beats;
+      }
+    });
+  }
+
+  async previewSingleNote(idx) {
+    const n = this.notes[idx];
+    if (!n || n.isRest || n.step === "rest" || n.jianpu === "0") return;
+    await this.initAudio();
+    const freq = this.stepToFrequency(n.step, n.octave, n.alter);
+    this.playSynthesizedTone(freq, 0.45);
+  }
+
+  copyNoteListToClipboard(format = "text") {
+    this.normalizeAllNotes(false);
+
+    if (format === "json") {
+      const payload = {
+        title: this.meta.title,
+        key: this.meta.key,
+        timeSignature: this.meta.timeSignature,
+        tempo: this.meta.tempo,
+        totalNotes: this.notes.length,
+        notes: this.notes.map((n, idx) => ({
+          index: idx + 1,
+          measure: n.measure,
+          jianpu: n.jianpu,
+          pitch: this.getDisplayPitchName(n) + (n.isRest ? "" : n.octave),
+          step: n.step,
+          alter: n.alter || 0,
+          octave: n.octave,
+          durationType: n.durationType,
+          dot: !!n.dot,
+          beats: this.getNoteBeats(n),
+          isRest: !!n.isRest,
+          string: n.string,
+          finger: n.finger ?? 0,
+          bow: n.bow || ""
+        }))
+      };
+      const jsonStr = JSON.stringify(payload, null, 2);
+      navigator.clipboard.writeText(jsonStr).then(() => {
+        alert(`📋 音符リスト全体（全${this.notes.length}音・JSON形式）をクリップボードにコピーしました！`);
+      }).catch(err => {
+        alert("コピーに失敗しました: " + err.message);
+      });
+      return;
+    }
+
+    // Build human- & spreadsheet-friendly text + TSV report
+    const [beatsPerMeasureStr] = String(this.meta.timeSignature || "2/4").split("/");
+    const expectedBeats = parseFloat(beatsPerMeasureStr) || 2;
+    const durationLabelMap = {
+      "16th": "16分(16th)",
+      "eighth": "8分(eighth)",
+      "quarter": "4分(quarter)",
+      "half": "2分(half)",
+      "whole": "全音符(whole)"
+    };
+
+    const measureMap = new Map();
+    this.notes.forEach(n => {
+      const m = n.measure || 1;
+      if (!measureMap.has(m)) measureMap.set(m, { tokens: [], beats: 0 });
+      const item = measureMap.get(m);
+      const b = this.getNoteBeats(n);
+      const durMark = n.durationType === "half" ? " -" : (n.durationType === "whole" ? " - - -" : (n.durationType === "eighth" ? "_" : (n.durationType === "16th" ? "=" : "")));
+      const dotMark = n.dot ? "·" : "";
+      item.tokens.push(`${n.jianpu}${durMark}${dotMark}`);
+      item.beats += b;
+    });
+
+    const lines = [];
+    lines.push(`# 二胡 数字譜解析・音符リストチェック表`);
+    lines.push(`曲名: ${this.meta.title} | 調号: ${this.meta.key} | 拍子: ${this.meta.timeSignature} | テンポ: ${this.meta.tempo} BPM | 総音符数: ${this.notes.length}音（全${measureMap.size}小節）`);
+    lines.push(``);
+    lines.push(`## 1. 小節別 数字譜サマリー`);
+    measureMap.forEach((val, mNum) => {
+      const warn = Math.abs(val.beats - expectedBeats) > 0.05 ? ` ⚠️(計${val.beats}拍 / 基準${expectedBeats}拍)` : ` (${val.beats}拍)`;
+      lines.push(`第${mNum}小節: ${val.tokens.join(" ")}${warn}`);
+    });
+    lines.push(``);
+    lines.push(`## 2. 音符リスト全件詳細（タブ区切り・Excel/スプレッドシート貼付対応）`);
+    lines.push(["No.", "小節", "数字譜", "音名", "オクターブ", "音価(長さ)", "付点", "拍数", "休符", "弦", "指", "弓"].join("\t"));
+
+    this.notes.forEach((n, idx) => {
+      const displayPitch = this.getDisplayPitchName(n);
+      const durLabel = durationLabelMap[n.durationType] || n.durationType;
+      const beats = this.getNoteBeats(n);
+      const stringLabel = n.string === "outer" ? "外弦(A)" : "内弦(D)";
+      lines.push([
+        idx + 1,
+        n.measure,
+        n.jianpu,
+        displayPitch,
+        n.isRest ? "-" : n.octave,
+        durLabel,
+        n.dot ? "付点あり" : "-",
+        beats,
+        n.isRest ? "休符" : "-",
+        n.isRest ? "-" : stringLabel,
+        n.isRest ? "-" : (n.finger ?? 0),
+        n.bow || "-"
+      ].join("\t"));
+    });
+
+    const fullText = lines.join("\n");
+    navigator.clipboard.writeText(fullText).then(() => {
+      alert(`📋 音符リスト全体（全${measureMap.size}小節・${this.notes.length}音符）をクリップボードにコピーしました！\n\nメモ帳・Excel・スプレッドシート・AIチャット等にそのまま貼り付けてチェックできます。`);
+    }).catch(err => {
+      alert("コピーに失敗しました: " + err.message);
     });
   }
 
@@ -1695,14 +1994,15 @@ ${measuresXml}  </part>
    - 数字の真上の点: 1オクターブ上
    - 数字の右横の点（例: 「2. 3 2」の「2.」など）: 付点音符（リズムが1.5倍、<dot/>タグ）であり、低音オクターブではありません！絶対に1オクターブ下げないでください。
 
-4. 音価（リズム）と小節線の整合性:
-   - 数字のみ（下線なし）: 四分音符 (quarter)
-   - 下線1本: 八分音符 (eighth)
-   - 下線2本: 十六分音符 (16th)
-   - 伸ばし棒「-」: 1拍延長（例: 「1 -」は二分音符）
-   - 付点「.」: 音価1.5倍
+4. 音価（リズム）と小節線の整合性（超重要）:
+   - 数字のみ（下線なし）: 四分音符 (quarter = 1拍)
+   - 下線1本: 八分音符 (eighth = 0.5拍)
+   - 下線2本: 十六分音符 (16th = 0.25拍)
+   - 伸ばし棒「-」（増時線）: 直前の音を1拍延長します。
+     ※【厳守】「2 -」や「1 -」や「3 -」と書かれている場合、絶対に四分音符2つ（2と2、1と1）に分割してはいけません！必ず1つの「二分音符 (<type>half</type>, 2拍)」として出力してください。「X - -」なら付点二分音符（3拍）、「X - - -」なら全音符（4拍）です。
+   - 付点「.」: 音価1.5倍（例: 下線なし「2.」は付点四分音符 1.5拍、下線1本「3_.」は付点八分音符 0.75拍）
    - 「0」: 休符 (<rest/>)
-   - 指定された拍子（2/4拍子なら1小節に2拍分、4/4拍子なら4拍分）にぴったり合致するよう、各小節のdurationとnote typeを厳密に計算してください。
+   - 縦線「|」は小節線です。指定された拍子（2/4拍子なら1小節に必ず合計2.0拍、3/4拍子なら3.0拍、4/4拍子なら4.0拍）に100%合致するよう、小節線「|」ごとの拍数を検算し、1拍だけの不完全な小節や余分な小節ズレが発生しないようにしてください。
 
 5. 運指・弓記号（可能な限り付与）:
    - ⊓: <down-bow/>
@@ -1816,16 +2116,21 @@ ${measuresXml}  </part>
    - 1=D: 1=D4(inner,finger:0), 2=E4(inner,1), 3=F#4(inner,2), 4=G4(inner,3), 5=A4(outer,0), 6=B4(outer,1), 7=C#5(outer,2), 1^=D5(outer,3), 2^=E5(outer,4)
    - 1=G: 5.=D4(inner,finger:0), 6.=E4(inner,1), 7.=F#4(inner,2), 1=G4(inner,finger:3 ※0ではありません), 2=A4(outer,0), 3=B4(outer,1), 4=C5(outer,2 ※octave:5), 5=D5(outer,3 ※octave:5), 6=E5(outer,4 ※octave:5), 7=F#5(outer,4)
    - 1=F: 6.=D4(inner,0), 7.=E4(inner,1), 1=F4(inner,2), 2=G4(inner,3), 3=A4(outer,0), 4=Bb4(outer,1), 5=C5(outer,2), 6=D5(outer,3), 7=E5(outer,4)
-2. オクターブ記号と付点の区別:
+2. オクターブ記号と付点の区別（厳守）:
    - 数字の真下の点（5., 6., 7. など）のみ jianpu に "." を付けてください (例: "5.")。
-   - 数字の真上の点（高音）は jianpu に "^" を付けてください (例: "1^")。
-   - 数字の右横の点（例: ふるさと「2. 3 2」の付点四分音符「2.」など）はリズムの付点なので、jianpu は "2" とし、"dot": true に設定してください（jianpu に "." を書くと低音と誤認されます）。
-3. 音価（リズム）:
-   - 下線なし: 四分音符 (quarter)
-   - 下線1本: 八分音符 (eighth)
-   - 下線2本: 十六分音符 (16th)
-   - 伸ばし棒「-」: 二分音符や全音符へ加算
-   - 付点「.」: 音価を1.5倍
+   - 数字の真上に明確な黒点（・）が印字されている場合のみ、jianpu に "^" を付けてください (例: "1^")。
+     ※【超重要】数字の真上に点が印字されていない通常の「1」は、直前の音が「5」であっても必ず中音の "1" (1=D調なら D4・octave:4・内弦0指) です！点が無いのに勝手に "1^" (D5) にすることは絶対禁止です！
+   - 数字の右横の点（例: ふるさと「2. 3 2」の付点四分音符「2.」など）はリズムの付点なので、jianpu は "2" とし、"dot": true に設定してください。
+3. 音価（リズム）・下線の有無・歌詞との1対1対応（超重要）:
+   - 【音符の水増し厳禁】各小節内の音符（数字）の個数は、画像に印字されている数字の個数（および下に書かれた歌詞の漢字の数）と完全に1対1で一致させてください！
+     例えば「3_ 3_ 2」（歌詞「春天来」の3文字＝数字3個）を、勝手に「3_ 3_ 3_ 2_」（数字4個）に増やすことは絶対禁止です！
+     「3_ 3_ 2」は最初の「3 3」の2個だけが下線ありの八分音符 (eighth = 0.5拍×2)、3個目の「2」は下線なしの四分音符 (quarter = 1.0拍) で合計2.0拍です。
+   - 【2音の小節の注意】2/4拍子で1小節に下線なしの数字が2個ある場合（例: 「| 2 3 |」歌詞「都 飞」の2文字）、必ず四分音符2つ (quarter = 1.0拍 × 2個 = 2.0拍) として出力してください。八分音符2つ（計1拍）にしてはいけません！
+   - 下線なし: 四分音符 (quarter = 1拍)
+   - 下線1本: 八分音符 (eighth = 0.5拍)
+   - 下線2本: 十六分音符 (16th = 0.25拍)
+   - 伸ばし棒「-」: 直前の音を1拍延長します。「2 -」や「1 -」は必ず durationType: "half"（二分音符、1つの音符）として出力してください。
+   - 付点「.」: 音価を1.5倍 ("dot": true)
    - 「0」: 休符 (rest)
 4. 二胡運指・弓記号:
    - ⊓: 引き弓 (down-bow)
@@ -1905,6 +2210,7 @@ ${measuresXml}  </part>
         this.meta.timeSignature = this.normalizeTimeSignature(parsed.timeSignature);
         this.meta.tempo = parseInt(parsed.tempo, 10) || 88;
         this.notes = parsed.notes;
+        this.autoFixMeasureRhythms();
         this.normalizeAllNotes(false);
 
         if (this.scorePlaceholder) {
@@ -2007,35 +2313,57 @@ ${measuresXml}  </part>
     throw new Error("JSON構文の修復に失敗しました。AIの出力形式をご確認ください。");
   }
 
-  // Audio Playback using WebAudio (with iOS/iPadOS/Android unlock support)
+  // Audio Playback using WebAudioFont + Erhu Physical Model (matching index.html / app.js)
   async initAudio() {
+    let newlyCreatedOrResumed = false;
     if (!this.audioCtx) {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       this.audioCtx = new AudioContext();
+      newlyCreatedOrResumed = true;
     }
     if (this.audioCtx.state === "suspended") {
       try {
         await this.audioCtx.resume();
+        newlyCreatedOrResumed = true;
       } catch (e) {
         console.warn("AudioContext resume warning:", e);
       }
     }
-    // Play silent 1-frame buffer to unlock audio on mobile Safari / iPad
-    try {
-      const buffer = this.audioCtx.createBuffer(1, 1, 22050);
-      const source = this.audioCtx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(this.audioCtx.destination);
-      source.start(0);
-    } catch (e) {
-      // Ignore if not needed
+    // Play silent 1-frame buffer ONLY ONCE using native sampleRate to unlock mobile Safari/iPad without resampling glitch
+    if (!this.audioUnlocked) {
+      try {
+        const buffer = this.audioCtx.createBuffer(1, 1, this.audioCtx.sampleRate || 44100);
+        const source = this.audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.audioCtx.destination);
+        source.start(0);
+        this.audioUnlocked = true;
+      } catch (e) {
+        // Ignore
+      }
+    }
+    // Initialize WebAudioFont player if available (same as traditional player)
+    if (!this.wafPlayer && window.WebAudioFontPlayer) {
+      this.wafPlayer = new window.WebAudioFontPlayer();
+      if (window._tone_1100_GeneralUserGS_sf2_file) {
+        this.wafPlayer.loader.decodeAfterLoading(this.audioCtx, "_tone_1100_GeneralUserGS_sf2_file");
+        this.wafInstrument = window._tone_1100_GeneralUserGS_sf2_file;
+      }
+    }
+    // Give audio hardware buffer 45ms to stabilize when waking up so the 1st note attack is never crushed
+    if (newlyCreatedOrResumed) {
+      await new Promise(resolve => setTimeout(resolve, 45));
     }
   }
 
-  stepToFrequency(step, octave, alter = 0) {
+  stepToMidi(step, octave, alter = 0) {
     const semitones = { "C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11 };
     const parsed = this.parseStepAndAlter(step, alter);
-    const baseMidi = 12 * ((parseInt(octave, 10) || 4) + 1) + (semitones[parsed.step] ?? 0) + (parsed.alter || 0);
+    return 12 * ((parseInt(octave, 10) || 4) + 1) + (semitones[parsed.step] ?? 0) + (parsed.alter || 0);
+  }
+
+  stepToFrequency(step, octave, alter = 0) {
+    const baseMidi = this.stepToMidi(step, octave, alter);
     return 440 * Math.pow(2, (baseMidi - 69) / 12);
   }
 
@@ -2057,20 +2385,11 @@ ${measuresXml}  </part>
     this.btnPlayScore.textContent = "⏸ 一時停止";
 
     let noteIdx = 0;
-    let expectedNextTime = performance.now();
 
-    const playNext = async () => {
+    const playNext = () => {
       if (!this.isPlaying || noteIdx >= this.notes.length) {
         this.stopPlayback();
         return;
-      }
-
-      if (this.audioCtx && this.audioCtx.state === "suspended") {
-        try {
-          await this.audioCtx.resume();
-        } catch (e) {
-          // Ignore
-        }
       }
 
       const n = this.notes[noteIdx];
@@ -2091,16 +2410,13 @@ ${measuresXml}  </part>
       const durationSec = Math.max(0.08, durationFactor * beatSec);
 
       if (!n.isRest && n.step !== "rest" && n.jianpu !== "0") {
-        const freq = this.stepToFrequency(n.step, n.octave, n.alter);
-        // Keep bow articulation gap tiny (max 25ms) so half/whole notes never cut off early with a silent pause
-        const toneDuration = Math.max(0.06, durationSec - Math.min(0.025, durationSec * 0.05));
-        this.playSynthesizedTone(freq, toneDuration);
+        const midi = this.stepToMidi(n.step, n.octave, n.alter);
+        const freq = 440 * Math.pow(2, (midi - 69) / 12);
+        this.playSynthesizedTone(freq, durationSec, midi);
       }
 
       noteIdx++;
-      expectedNextTime += durationSec * 1000;
-      const delayMs = Math.max(10, expectedNextTime - performance.now());
-      this.playbackTimer = setTimeout(playNext, delayMs);
+      this.playbackTimer = setTimeout(playNext, durationSec * 1000);
     };
 
     playNext();
@@ -2113,68 +2429,106 @@ ${measuresXml}  </part>
       clearTimeout(this.playbackTimer);
       this.playbackTimer = null;
     }
+    if (this.wafPlayer && this.audioCtx) {
+      try {
+        this.wafPlayer.cancelQueue(this.audioCtx);
+      } catch (e) {
+        // Ignore
+      }
+    }
   }
 
-  playSynthesizedTone(freq, duration) {
+  playSynthesizedTone(freq, duration, midiOverride = null) {
     if (!this.audioCtx || !Number.isFinite(freq) || freq <= 0) return;
     const ctx = this.audioCtx;
-    const t = ctx.currentTime;
-    const safeDur = Math.max(0.06, duration);
+    const safeDur = Math.max(0.08, duration);
+    const midi = midiOverride !== null ? midiOverride : Math.round(69 + 12 * Math.log2(freq / 440));
 
+    // 1. Use WebAudioFont real sampled Fiddle/Erhu soundfont if decoded (exact same engine as index.html / app.js)
+    const isDecoded = this.wafInstrument && Array.isArray(this.wafInstrument.zones) && this.wafInstrument.zones.some(z => z.buffer);
+    if (this.wafPlayer && isDecoded) {
+      const when = ctx.currentTime + 0.015; // Small 15ms lookahead prevents initial attack clipping
+      const envelope = this.wafPlayer.queueWaveTable(
+        ctx,
+        ctx.destination,
+        this.wafInstrument,
+        when,
+        midi,
+        safeDur,
+        0.85
+      );
+      if (envelope && envelope.audioBufferSourceNode && envelope.audioBufferSourceNode.detune) {
+        try {
+          const lfo = ctx.createOscillator();
+          const lfoGain = ctx.createGain();
+          lfo.frequency.setValueAtTime(5.4, when);
+          lfoGain.gain.setValueAtTime(12, when);
+          lfo.connect(lfoGain);
+          lfoGain.connect(envelope.audioBufferSourceNode.detune);
+          lfo.start(when + 0.08);
+          lfo.stop(when + safeDur);
+        } catch (e) {
+          // Ignore
+        }
+      }
+      return;
+    }
+
+    // 2. Fallback: Clean Erhu Physical Model (with 15ms lookahead & balanced harmonic gain so it never clips)
+    const startTime = ctx.currentTime + 0.015;
     const oscMain = ctx.createOscillator();
-    const oscSub = ctx.createOscillator();
-    const vibratoLfo = ctx.createOscillator();
-    const vibratoGain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    const gain = ctx.createGain();
+    const oscHarm1 = ctx.createOscillator();
+    const gainMain = ctx.createGain();
+    const gainHarm1 = ctx.createGain();
+    const bodyFilter = ctx.createBiquadFilter();
+    const lowpass = ctx.createBiquadFilter();
+    const masterGain = ctx.createGain();
 
     oscMain.type = "sawtooth";
-    oscSub.type = "triangle";
-    oscMain.frequency.setValueAtTime(freq, t);
-    oscSub.frequency.setValueAtTime(freq * 2, t);
+    oscHarm1.type = "triangle";
+    oscMain.frequency.setValueAtTime(freq, startTime);
+    oscHarm1.frequency.setValueAtTime(freq * 2, startTime);
 
-    // Subtle Erhu vibrato (揉弦) on sustained notes so long notes sound alive and never feel frozen
-    vibratoLfo.frequency.setValueAtTime(5.2, t);
-    vibratoGain.gain.setValueAtTime(freq * 0.012, t);
-    vibratoLfo.connect(vibratoGain);
-    vibratoGain.connect(oscMain.frequency);
+    gainMain.gain.setValueAtTime(0.5, startTime);
+    gainHarm1.gain.setValueAtTime(0.25, startTime);
 
-    // Warm Erhu body resonance filter
-    filter.type = "lowpass";
-    filter.frequency.setValueAtTime(2800, t);
+    bodyFilter.type = "peaking";
+    bodyFilter.frequency.setValueAtTime(850, startTime);
+    bodyFilter.Q.setValueAtTime(2.5, startTime);
+    bodyFilter.gain.setValueAtTime(4, startTime);
 
-    // Smooth bow envelope without premature cutoff
-    const attack = Math.min(0.035, safeDur * 0.25);
-    const release = Math.min(0.035, safeDur * 0.25);
-    const sustainEnd = Math.max(t + attack, t + safeDur - release);
+    lowpass.type = "lowpass";
+    lowpass.frequency.setValueAtTime(3200, startTime);
 
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.linearRampToValueAtTime(0.28, t + attack);
-    gain.gain.setValueAtTime(0.26, sustainEnd);
-    gain.gain.linearRampToValueAtTime(0.0001, t + safeDur);
+    const attack = Math.min(0.04, safeDur * 0.25);
+    const release = Math.min(0.06, safeDur * 0.25);
+    masterGain.gain.setValueAtTime(0.0001, startTime);
+    masterGain.gain.linearRampToValueAtTime(0.45, startTime + attack);
+    masterGain.gain.setValueAtTime(0.40, Math.max(startTime + attack, startTime + safeDur - release));
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, startTime + safeDur);
 
-    oscMain.connect(filter);
-    oscSub.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
+    oscMain.connect(gainMain);
+    oscHarm1.connect(gainHarm1);
+    gainMain.connect(bodyFilter);
+    gainHarm1.connect(bodyFilter);
+    bodyFilter.connect(lowpass);
+    lowpass.connect(masterGain);
+    masterGain.connect(ctx.destination);
 
-    oscMain.start(t);
-    oscSub.start(t);
-    vibratoLfo.start(t + Math.min(0.12, safeDur * 0.5));
+    oscMain.start(startTime);
+    oscHarm1.start(startTime);
+    oscMain.stop(startTime + safeDur);
+    oscHarm1.stop(startTime + safeDur);
 
-    oscMain.stop(t + safeDur);
-    oscSub.stop(t + safeDur);
-    vibratoLfo.stop(t + safeDur);
-
-    // Clean up audio nodes after completion to prevent memory/audio glitches
     oscMain.onended = () => {
       try {
         oscMain.disconnect();
-        oscSub.disconnect();
-        vibratoLfo.disconnect();
-        vibratoGain.disconnect();
-        filter.disconnect();
-        gain.disconnect();
+        oscHarm1.disconnect();
+        gainMain.disconnect();
+        gainHarm1.disconnect();
+        bodyFilter.disconnect();
+        lowpass.disconnect();
+        masterGain.disconnect();
       } catch (e) {
         // Ignore
       }

@@ -16,6 +16,9 @@
   </script>
   <!-- OpenSheetMusicDisplay (OSMD) CDN for MusicXML Rendering -->
   <script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.8.8/build/opensheetmusicdisplay.min.js"></script>
+  <!-- WebAudioFont Player & Real Instrument Soundfont CDN (same as index.html) -->
+  <script src="https://surikov.github.io/webaudiofont/npm/dist/WebAudioFontPlayer.js"></script>
+  <script src="https://surikov.github.io/webaudiofontdata/sound/1100_GeneralUserGS_sf2_file.js"></script>
   <link rel="stylesheet" href="musicxml_app.css">
 </head>
 <body>
@@ -165,9 +168,19 @@
               </div>
             </div>
             <div class="table-actions">
+              <button id="btnCopyNoteList" class="btn btn-sm btn-primary" title="生成された音符リスト全体（小節別数字譜＋全音符テーブル）をクリップボードにコピー">📋 音符リストをコピー</button>
+              <button id="btnCopyNoteJson" class="btn btn-sm btn-ghost" title="音符リストをJSON形式でクリップボードにコピー">📋 JSONコピー</button>
               <button id="btnAddNoteRow" class="btn btn-sm btn-secondary">＋ 音符追加</button>
               <button id="btnApplyTableChanges" class="btn btn-sm btn-accent">XMLに反映 ➔</button>
             </div>
+          </div>
+          <!-- Quick Jianpu & Measure Check Summary Bar + Direct Text Editor -->
+          <div id="noteCheckSummaryBar" style="padding: 8px 14px; background: rgba(255, 255, 255, 0.04); border-bottom: 1px solid var(--border-subtle); font-size: 0.84rem; line-height: 1.5;">
+          </div>
+          <div style="padding: 8px 14px; background: rgba(212, 175, 55, 0.06); border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <span style="font-size: 0.8rem; color: var(--accent-gold); font-weight: 600; white-space: nowrap;">✏️ 数字譜テキストで一括修正:</span>
+            <input type="text" id="quickJianpuInput" class="input-sm" style="flex: 1; min-width: 260px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;" placeholder="例: 3_ 3_ 2 | 3_ 3_ 2 | 3_ 5_ 5_ 1_ | 2 - | ...">
+            <button id="btnApplyQuickJianpu" class="btn btn-xs btn-accent" title="入力した数字譜テキスト（|区切り）から全小節の音符リストと五線譜を一括生成・修正します">⚡ 数字譜テキストを反映</button>
           </div>
           <div class="note-table-wrapper">
             <table class="note-table" id="noteTable">
@@ -214,6 +227,9 @@
             <span id="exportStatusText">MusicXMLデータ準備完了</span>
           </div>
           <div class="export-btn-group">
+            <button id="btnCopyNoteListFooter" class="btn btn-secondary" title="音符リストの全体をクリップボードにコピーします">
+              📋 音符リストをコピー
+            </button>
             <button id="btnCopyXml" class="btn btn-secondary">
               📋 XMLをコピー
             </button>
